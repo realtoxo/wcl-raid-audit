@@ -1,0 +1,20 @@
+{
+  "name": "wcl-raid-audit",
+  "interface": {
+    "displayName": "WCL Raid Audit"
+  },
+  "plugins": [
+    {
+      "name": "wcl-raid-audit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wcl-raid-audit"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

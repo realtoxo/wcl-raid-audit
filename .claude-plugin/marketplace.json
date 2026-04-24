@@ -1,0 +1,29 @@
+{
+  "name": "wcl-raid-audit",
+  "owner": {
+    "name": "WCL Raid Audit Contributors"
+  },
+  "metadata": {
+    "description": "Guild-ready WoW TBC raid auditing plugins for Parseforge and Warcraft Logs."
+  },
+  "plugins": [
+    {
+      "name": "wcl-raid-audit",
+      "source": "./plugins/wcl-raid-audit",
+      "description": "Guild-ready WoW TBC raid auditing plugin powered by Parseforge and Warcraft Logs.",
+      "version": "0.1.0",
+      "author": {
+        "name": "WCL Raid Audit Contributors"
+      },
+      "license": "MIT",
+      "keywords": [
+        "world-of-warcraft",
+        "tbc",
+        "warcraft-logs",
+        "parseforge",
+        "raid-audit"
+      ],
+      "category": "productivity"
+    }
+  ]
+}

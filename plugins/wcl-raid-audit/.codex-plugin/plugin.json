@@ -1,0 +1,33 @@
+{
+  "name": "wcl-raid-audit",
+  "version": "0.1.0",
+  "description": "Guild-ready WoW TBC raid auditing plugin powered by Parseforge and Warcraft Logs.",
+  "author": {
+    "name": "WCL Raid Audit Contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "world-of-warcraft",
+    "tbc",
+    "warcraft-logs",
+    "parseforge",
+    "raid-audit"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "WCL Raid Audit",
+    "shortDescription": "Officer-ready TBC raid log audits",
+    "longDescription": "Create Discord-ready raid leadership audits from Parseforge and Warcraft Logs, covering consumes, boss debuff uptime, Windfury, sappers, enchants, and green gems.",
+    "developerName": "WCL Raid Audit Contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Turn this Parseforge URL into a leadership raid audit.",
+      "Audit this raid report for consumes, debuffs, and green gems.",
+      "Check Windfury, sappers, enchants, and boss debuff uptime."
+    ]
+  }
+}

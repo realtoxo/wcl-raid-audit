@@ -1,0 +1,4 @@
+interface:
+  display_name: "WCL Raid Audit"
+  short_description: "Officer-ready TBC raid log audits"
+  default_prompt: "Use $wcl-raid-audit to turn this Parseforge URL or report code into a Discord-ready leadership raid audit."

@@ -1,0 +1,152 @@
+{
+  "name": "default-tbc-guild-policy",
+  "version": 1,
+  "reportTitle": "WCL Raid Audit",
+  "reportRules": [
+    "Physical DPS: expected Flask of Relentless Assault on Maulgar + Gruul.",
+    "Hunters: Flask of Relentless Assault OR Elixir of Major Agility + guardian/mana elixir is acceptable on Maulgar + Gruul.",
+    "Physical DPS: expected Elixir of Demonslaying on Magtheridon.",
+    "Casters / mana users: expected flask OR battle elixir + guardian elixir.",
+    "Elixir of Major Agility / Major Strength count as real offensive consumes, but are marked **Suboptimal** when they do not meet the encounter/class expectation.",
+    "Flask of Blinding Light is acceptable for Protection Paladin and spell-damage caster roles where appropriate.",
+    "Melee/physical are not flagged for missing guardian elixir.",
+    "Food and weapon enhancements are flagged only when fully missing.",
+    "Gear enchants expected.",
+    "Sapper usage encouraged."
+  ],
+  "general": {
+    "food": {
+      "expected": true,
+      "flagLowUptime": false
+    },
+    "weaponEnhancement": {
+      "expected": true,
+      "flagLowUptime": false,
+      "assumeWindfuryCanCoverMainHand": true
+    },
+    "enchants": {
+      "expected": true
+    },
+    "sappers": {
+      "encouraged": true,
+      "required": false,
+      "reportNonUsers": false,
+      "reportByEncounter": false
+    },
+    "casterMana": {
+      "acceptAnyFlask": true,
+      "requiresBattleAndGuardianIfNoFlask": true
+    }
+  },
+  "trackedDebuffs": {
+    "title": "Boss Debuff Uptime",
+    "groups": [
+      {
+        "label": "Warlock curses",
+        "kind": "pattern",
+        "namePattern": "^Curse of ",
+        "alwaysShow": true,
+        "emptyText": "none"
+      },
+      {
+        "label": "IEA / Expose Armor",
+        "kind": "ability",
+        "abilityId": 26866,
+        "abilityName": "Expose Armor",
+        "alwaysShow": true,
+        "emptyText": "0.0%"
+      },
+      {
+        "label": "Expose Weakness",
+        "kind": "ability",
+        "abilityId": 34501,
+        "abilityName": "Expose Weakness",
+        "alwaysShow": true,
+        "emptyText": "0.0%"
+      }
+    ]
+  },
+  "encounters": [
+    {
+      "name": "High King Maulgar",
+      "match": "maulgar",
+      "physicalDps": {
+        "expectedFlasks": ["Flask of Relentless Assault"],
+        "suboptimalBattleElixirs": ["Elixir of Major Agility", "Elixir of Major Strength"],
+        "ignoreMissingGuardian": true,
+        "hunter": {
+          "expectedText": "Flask of Relentless Assault or Elixir of Major Agility + guardian/mana elixir",
+          "acceptableFlasks": ["Flask of Relentless Assault"],
+          "acceptableBattleGuardianSetups": [
+            {
+              "battleElixir": "Elixir of Major Agility",
+              "requiresGuardian": true
+            }
+          ]
+        }
+      },
+      "casterMana": {
+        "acceptAnyFlask": true,
+        "requiresBattleAndGuardianIfNoFlask": true
+      }
+    },
+    {
+      "name": "Gruul the Dragonkiller",
+      "match": "gruul",
+      "physicalDps": {
+        "expectedFlasks": ["Flask of Relentless Assault"],
+        "suboptimalBattleElixirs": ["Elixir of Major Agility", "Elixir of Major Strength"],
+        "ignoreMissingGuardian": true,
+        "hunter": {
+          "expectedText": "Flask of Relentless Assault or Elixir of Major Agility + guardian/mana elixir",
+          "acceptableFlasks": ["Flask of Relentless Assault"],
+          "acceptableBattleGuardianSetups": [
+            {
+              "battleElixir": "Elixir of Major Agility",
+              "requiresGuardian": true
+            }
+          ]
+        }
+      },
+      "casterMana": {
+        "acceptAnyFlask": true,
+        "requiresBattleAndGuardianIfNoFlask": true
+      }
+    },
+    {
+      "name": "Magtheridon",
+      "match": "magtheridon",
+      "physicalDps": {
+        "expectedBattleElixirs": ["Elixir of Demonslaying"],
+        "suboptimalBattleElixirs": ["Elixir of Major Agility", "Elixir of Major Strength"],
+        "suboptimalFlasks": ["Flask of Relentless Assault"],
+        "ignoreMissingGuardian": true,
+        "hunter": {
+          "expectedText": "Elixir of Demonslaying",
+          "acceptableBattleGuardianSetups": [
+            {
+              "battleElixir": "Elixir of Demonslaying",
+              "requiresGuardian": false
+            }
+          ]
+        }
+      },
+      "casterMana": {
+        "acceptAnyFlask": true,
+        "requiresBattleAndGuardianIfNoFlask": true
+      }
+    }
+  ],
+  "roleNotes": {
+    "flaskOfBlindingLightAcceptableFor": [
+      "Protection Paladin",
+      "Arcane Mage",
+      "spell-damage casters"
+    ],
+    "manualReviewInsteadOfHardFlag": [
+      "tanks",
+      "spell-tank assignments",
+      "incorrect Parseforge role classification"
+    ]
+  }
+}
