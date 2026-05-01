@@ -33,8 +33,8 @@ Use WCL v1 for boss debuff uptime. Parseforge is still useful for roster/spec co
 Current default policy tracks:
 
 - all `Curse of ...` debuffs under `Warlock curses`
-- `Expose Armor` under `IEA / Expose Armor`
 - `Expose Weakness`
+- `Judgement of Wisdom`
 
 ## Attribution
 
@@ -61,12 +61,13 @@ Render a single section:
 **Boss Debuff Uptime**
 - Encounter:
   - Warlock curses: Curse of the Elements 97.7% (Tombaldini); Curse of Doom 83.1% (Juggathot, Rizzerz)
-  - IEA / Expose Armor: 74.9% (Ironlion)
   - Expose Weakness: 82.0% (Folgrím)
+  - Judgement of Wisdom: 94.0% (initial Kojay; reapplied by Texz)
 ```
 
 ## Notes
 
 - Prefer the primary boss actor whose WCL enemy actor name matches the encounter name.
 - For multi-source curse types, list all unique source names, but do not sum per-source uptime.
+- For Judgement of Wisdom, use debuff events to identify the first applier and refresh/reapply sources.
 - If WCL credentials are unavailable, omit the section and surface a clear note instead of inventing values.

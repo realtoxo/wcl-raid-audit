@@ -11,7 +11,7 @@ const SKILL_DIR = resolve(TEST_DIR, "..");
 const SCRIPT_PATH = resolve(SKILL_DIR, "scripts/raid_audit.mjs");
 const REPORT_CODE = "cPwzZJ7xNGf3M1Bv";
 
-test("boss debuff uptime section reports curse, expose armor, and expose weakness uptimes", async () => {
+test("boss debuff uptime section reports curse and expose weakness uptimes", async () => {
   const { stdout } = await execFile("node", [SCRIPT_PATH, REPORT_CODE, "--markdown"], {
     env: process.env,
     maxBuffer: 1024 * 1024 * 10,
@@ -22,10 +22,7 @@ test("boss debuff uptime section reports curse, expose armor, and expose weaknes
     stdout,
     /- Warlock curses: Curse of the Elements 97\.7% \(Tombaldini\); Curse of Doom 83\.1% \(Juggathot, Rizzerz\); Curse of Agony 13\.3% \(Juggathot, Rizzerz\)/,
   );
-  assert.match(
-    stdout,
-    /- IEA \/ Expose Armor: 69\.5% \(Ironlion\)/,
-  );
+  assert.doesNotMatch(stdout, /IEA \/ Expose Armor/);
   assert.match(
     stdout,
     /- Expose Weakness: 44\.2% \(Folgrím\)/,

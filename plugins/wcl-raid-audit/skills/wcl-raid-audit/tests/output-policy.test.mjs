@@ -1,0 +1,310 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
+import { createServer } from "node:http";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, dirname, resolve } from "node:path";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+
+const execFile = promisify(execFileCallback);
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+const SKILL_DIR = resolve(TEST_DIR, "..");
+const SCRIPT_PATH = resolve(SKILL_DIR, "scripts/raid_audit.mjs");
+
+function slot(spellName = "") {
+  return {
+    present: Boolean(spellName),
+    uptimePercent: spellName ? 100 : 0,
+    spellId: 0,
+    spellName,
+    isSuboptimal: false,
+    suboptimalReason: "",
+  };
+}
+
+function consumables({ flask = "", battleElixir = "", guardianElixir = "" } = {}) {
+  return {
+    flask: slot(flask),
+    battleElixir: slot(battleElixir),
+    guardianElixir: slot(guardianElixir),
+    food: slot("Well Fed"),
+    weaponEnhancement: slot("Weapon Enhancement (detected on gear)"),
+    scrolls: [],
+  };
+}
+
+function fightData(fightId, consumes) {
+  return { fightId, consumables: consumables(consumes) };
+}
+
+function duplicateGearPlayer(spec) {
+  return {
+    name: "Dupecat",
+    className: "Druid",
+    spec,
+    role: "Physical",
+    sourceId: spec === "Feral" ? 5 : 6,
+    fightData: [fightData(1, { flask: "Flask of Relentless Assault" })],
+    gearIssues: [{ issueType: "missing_enchant", slotName: "Back" }],
+    gearSnapshot: [
+      {
+        slotName: "Hands",
+        itemId: 27531,
+        itemName: "Wastewalker Gloves",
+        gems: [
+          { id: 23097, name: "Delicate Blood Garnet" },
+          { id: 23097, name: "Delicate Blood Garnet" },
+        ],
+      },
+    ],
+  };
+}
+
+async function withMockServer(handler, callback) {
+  const server = createServer(handler);
+  await new Promise((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  const { port } = server.address();
+  try {
+    await callback(`http://127.0.0.1:${port}`);
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+  }
+}
+
+test("output policy suppresses requested flags and reports compact potion usage", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "wcl-output-policy-"));
+  const policyPath = join(tmp, "policy.json");
+  await writeFile(policyPath, JSON.stringify({
+    name: "test-policy",
+    version: 1,
+    reportTitle: "WCL Raid Audit",
+    reportRules: [],
+    general: {
+      food: { expected: true },
+      weaponEnhancement: { expected: true },
+      enchants: { expected: true },
+      casterMana: { acceptAnyFlask: true, requiresBattleAndGuardianIfNoFlask: true },
+      physicalScrolls: { expected: false },
+    },
+    trackedDebuffs: {
+      groups: [
+        { label: "Warlock curses", kind: "pattern", namePattern: "^Curse of ", alwaysShow: true, emptyText: "none" },
+        { label: "IEA / Expose Armor", kind: "ability", abilityId: 26866, abilityName: "Expose Armor", alwaysShow: true, emptyText: "0.0%" },
+        { label: "Expose Weakness", kind: "ability", abilityId: 34501, abilityName: "Expose Weakness", alwaysShow: true, emptyText: "0.0%" },
+        { label: "Judgement of Wisdom", kind: "ability", abilityId: 20186, abilityName: "Judgement of Wisdom", alwaysShow: true, emptyText: "0.0%" },
+      ],
+    },
+    encounters: [
+      {
+        name: "High King Maulgar",
+        match: "maulgar",
+        physicalDps: { expectedFlasks: ["Flask of Relentless Assault"] },
+        casterMana: { acceptAnyFlask: true, requiresBattleAndGuardianIfNoFlask: true },
+      },
+      {
+        name: "Magtheridon",
+        match: "magtheridon",
+        physicalDps: {
+          expectedBattleElixirs: ["Elixir of Demonslaying"],
+          ignoreMissingGuardian: true,
+        },
+        casterMana: { acceptAnyFlask: true, requiresBattleAndGuardianIfNoFlask: true },
+      },
+    ],
+  }));
+
+  const players = [
+    {
+      name: "Tankmage",
+      className: "Mage",
+      spec: "Arcane",
+      role: "Caster",
+      sourceId: 1,
+      fightData: [fightData(1), fightData(2, { flask: "Flask of Relentless Assault" })],
+      gearIssues: [{ issueType: "missing_enchant", slotName: "Chest" }],
+      gearSnapshot: [],
+    },
+    {
+      name: "Goodflask",
+      className: "Warrior",
+      spec: "Fury",
+      role: "Physical",
+      sourceId: 2,
+      fightData: [
+        fightData(1, { flask: "Flask of Relentless Assault" }),
+        fightData(2, { flask: "Flask of Relentless Assault" }),
+      ],
+      gearIssues: [],
+      gearSnapshot: [],
+    },
+    {
+      name: "Zerodps",
+      className: "Warlock",
+      spec: "Destruction",
+      role: "Caster",
+      sourceId: 4,
+      fightData: [
+        fightData(1, { flask: "Flask of Pure Death" }),
+        fightData(2, { flask: "Flask of Pure Death" }),
+      ],
+      gearIssues: [],
+      gearSnapshot: [],
+    },
+    {
+      name: "Healz",
+      className: "Priest",
+      spec: "Holy",
+      role: "Healer",
+      sourceId: 3,
+      fightData: [fightData(1, { battleElixir: "Elixir of Healing Power", guardianElixir: "Elixir of Draenic Wisdom" })],
+      gearIssues: [
+        { issueType: "missing_enchant", slotName: "Back" },
+        { issueType: "missing_enchant", slotName: "Wrist" },
+      ],
+      gearSnapshot: [],
+    },
+    duplicateGearPlayer("Feral"),
+    duplicateGearPlayer("Guardian"),
+  ];
+
+  await withMockServer((req, res) => {
+    const url = new URL(req.url, "http://mock.local");
+    res.setHeader("content-type", "application/json");
+
+    if (url.pathname === "/api/report/policytest") {
+      res.end(JSON.stringify({
+        title: "policy test",
+        owner: "tester",
+        zone: "Gruul / Magtheridon",
+        fights: [
+          { id: 1, name: "High King Maulgar", kill: true, encounterID: 50649, duration: 60000 },
+          { id: 2, name: "Magtheridon", kill: true, encounterID: 50651, duration: 60000 },
+        ],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/api/cla") {
+      res.end(JSON.stringify({ fights: [], players }));
+      return;
+    }
+
+    if (url.pathname === "/api/analyze") {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        const request = JSON.parse(body || "{}");
+        const castsBySource = {
+          1: [{ name: "Destruction Potion", guid: 28508, playerCasts: 1 }],
+          2: [{ name: "Haste", guid: 28507, playerCasts: 2 }],
+          3: [],
+          4: [],
+        };
+        const player = players.find((candidate) => candidate.sourceId === request.sourceId);
+        res.end(JSON.stringify({
+          playerName: player?.name,
+          playerClass: player?.className,
+          playerSpec: player?.spec,
+          casts: castsBySource[request.sourceId] || [],
+          abilities: [],
+        }));
+      });
+      return;
+    }
+
+    if (url.pathname === "/report/fights/policytest") {
+      res.end(JSON.stringify({
+        fights: [
+          { id: 1, name: "High King Maulgar", start_time: 1000, end_time: 61000 },
+          { id: 2, name: "Magtheridon", start_time: 70000, end_time: 130000 },
+        ],
+        friendlies: [],
+        friendlyPets: [],
+        enemies: [{ id: 100, name: "Magtheridon", fights: [{ id: 2 }] }],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/report/tables/debuffs/policytest") {
+      res.end(JSON.stringify({
+        totalTime: 60000,
+        auras: [
+          { name: "Expose Armor", guid: 26866, totalUptime: 60000 },
+          { name: "Expose Weakness", guid: 34501, totalUptime: 30000 },
+          { name: "Judgement of Wisdom", guid: 20186, totalUptime: 45000 },
+        ],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/report/events/debuffs/policytest") {
+      res.end(JSON.stringify({
+        events: [
+          { type: "applydebuff", timestamp: 70000, source: { name: "Kojay" }, ability: { guid: 20186, name: "Judgement of Wisdom" } },
+          { type: "refreshdebuff", timestamp: 95000, source: { name: "Texz" }, ability: { guid: 20186, name: "Judgement of Wisdom" } },
+        ],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/23097") {
+      res.end(JSON.stringify({ name: "Delicate Blood Garnet", quality: 2 }));
+      return;
+    }
+
+    if (url.pathname === "/27531") {
+      res.end(JSON.stringify({ name: "Wastewalker Gloves", quality: 3 }));
+      return;
+    }
+
+    res.end(JSON.stringify({ auras: [], events: [] }));
+  }, async (baseUrl) => {
+    const { stdout } = await execFile("node", [
+      SCRIPT_PATH,
+      "policytest",
+      "--markdown",
+      "--policy",
+      policyPath,
+      "--skip-sappers",
+    ], {
+      env: {
+        ...process.env,
+        PARSEFORGE_BASE_URL: baseUrl,
+        WARCRAFTLOGS_V1_BASE_URL: baseUrl,
+        WARCRAFTLOGS_API_KEY: "test-key",
+        WCL_API_KEY: "",
+        WARCRAFTLOGS_CLIENT_ID: "",
+        WARCRAFTLOGS_CLIENT_SECRET: "",
+        WCL_CLIENT_ID: "",
+        WCL_CLIENT_SECRET: "",
+        WOWHEAD_TBC_TOOLTIP_BASE_URL: baseUrl,
+      },
+      maxBuffer: 1024 * 1024,
+    });
+
+    assert.doesNotMatch(stdout, /Tankmage: \*\*(Incomplete caster setup|Missing|Suboptimal)\*\*/);
+    assert.doesNotMatch(stdout, /Goodflask: \*\*Suboptimal\*\* - expected Elixir of Demonslaying/);
+    assert.doesNotMatch(stdout, /Healz: 2 missing - Back, Wrist/);
+    assert.match(stdout, /Healz: 1 missing - Wrist/);
+    assert.equal((stdout.match(/Dupecat: 1 missing - Back/g) || []).length, 1);
+    assert.doesNotMatch(stdout, /IEA \/ Expose Armor/);
+    assert.match(stdout, /- Judgement of Wisdom: 75\.0% \(initial Kojay; reapplied by Texz\)/);
+    assert.match(stdout, /\*\*Potion usage\*\*/);
+    assert.match(stdout, /- High King Maulgar:/);
+    assert.match(stdout, /  - No haste\/destruction potion: Zerodps/);
+    assert.match(stdout, /  - Multiple potion uses: Goodflask 2x Haste/);
+    assert.match(stdout, /  - Haste: Goodflask 2/);
+    assert.match(stdout, /  - Destruction: none/);
+    const potionSection = stdout.split("**Potion usage**")[1].split("\n\n**Enchant flags**")[0];
+    assert.doesNotMatch(potionSection, /Healz/);
+    assert.doesNotMatch(stdout, /Tankmage 0/);
+    assert.match(stdout, /- Magtheridon:/);
+    assert.match(stdout, /  - No haste\/destruction potion: Zerodps/);
+    assert.match(stdout, /  - Multiple potion uses: Goodflask 2x Haste/);
+    assert.match(stdout, /  - Haste: Goodflask 2/);
+    assert.match(stdout, /  - Destruction: Tankmage 1/);
+    assert.equal((stdout.match(/Dupecat: 2 green gems - Hands \(Wastewalker Gloves\): Delicate Blood Garnet x2/g) || []).length, 1);
+  });
+});
