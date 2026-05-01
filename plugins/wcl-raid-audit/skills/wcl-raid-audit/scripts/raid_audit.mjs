@@ -13,6 +13,7 @@ const DEFAULT_POLICY_PATH = resolve(SKILL_DIR, "references/default-guild-policy.
 const WCL_WF_ABILITY_ID = 25587;
 const WCL_GRACE_ABILITY_ID = 25359;
 const WCL_WF_GAP_THRESHOLD_MS = 10000;
+const COMMON_QUALITY = 1;
 const UNCOMMON_QUALITY = 2;
 const SCROLL_RANK_PATTERN = "(?:IV|V)";
 const wowheadItemCache = new Map();
@@ -577,7 +578,7 @@ async function auditGreenGems(cla) {
       for (const gem of item.gems || []) {
         const gemInfo = gemMeta.get(gem.id);
         const itemInfo = itemMeta.get(item.itemId);
-        if (gemInfo?.quality === UNCOMMON_QUALITY) {
+        if (isLowQualityGem(gemInfo)) {
           matches.push({
             slotName: item.slotName,
             itemId: item.itemId,
@@ -608,6 +609,10 @@ async function auditGreenGems(cla) {
 
   uniqueRows.sort((a, b) => b.gems.length - a.gems.length || a.player.localeCompare(b.player));
   return { rows: uniqueRows, errors };
+}
+
+function isLowQualityGem(gemInfo) {
+  return gemInfo?.quality === COMMON_QUALITY || gemInfo?.quality === UNCOMMON_QUALITY;
 }
 
 function isEnhancementShaman(player) {
@@ -1162,12 +1167,26 @@ async function auditPotionUsage(reportCode, report, fights, cla) {
     fights: fights.map((fight) => ({
       fightId: fight.id,
       fightName: fight.name,
-      rows: rows
-        .filter((row) => row.fightId === fight.id)
+      rows: mergePotionRows(rows.filter((row) => row.fightId === fight.id))
         .sort((a, b) => a.player.localeCompare(b.player)),
     })),
     errors,
   };
+}
+
+function mergePotionRows(rows) {
+  const byPlayer = new Map();
+  for (const row of rows) {
+    const key = `${row.player}\0${row.className}`;
+    const existing = byPlayer.get(key);
+    if (!existing) {
+      byPlayer.set(key, { ...row });
+      continue;
+    }
+    existing.haste = Math.max(existing.haste, row.haste);
+    existing.destruction = Math.max(existing.destruction, row.destruction);
+  }
+  return Array.from(byPlayer.values());
 }
 
 async function runLimited(tasks, limit) {
@@ -1330,10 +1349,10 @@ function renderMarkdown(result) {
 
   if (result.greenGemFindings.rows.length > 0) {
     lines.push("");
-    lines.push("**Green gem flags**");
+    lines.push("**Green/white gem flags**");
     for (const row of result.greenGemFindings.rows) {
       const details = formatGreenGemDetails(row.gems);
-      lines.push(`- ${row.player}: ${row.gems.length} green gem${row.gems.length === 1 ? "" : "s"} - ${details}`);
+      lines.push(`- ${row.player}: ${row.gems.length} green/white gem${row.gems.length === 1 ? "" : "s"} - ${details}`);
     }
   }
 
@@ -1351,7 +1370,7 @@ function renderMarkdown(result) {
     warningLines.push(`- Boss debuff uptime analysis had ${result.bossDebuffUptime.errors.length} WCL fetch errors; rerun if exact uptime values matter.`);
   }
   if (result.greenGemFindings.errors.length > 0) {
-    warningLines.push(`- Green gem analysis had ${result.greenGemFindings.errors.length} gem lookup errors; rerun if exact green gem flags matter.`);
+    warningLines.push(`- Green/white gem analysis had ${result.greenGemFindings.errors.length} gem lookup errors; rerun if exact gem flags matter.`);
   }
   if (warningLines.length > 0) {
     lines.push("");

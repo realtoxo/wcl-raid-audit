@@ -56,6 +56,7 @@ function duplicateGearPlayer(spec) {
         gems: [
           { id: 23097, name: "Delicate Blood Garnet" },
           { id: 23097, name: "Delicate Blood Garnet" },
+          { id: 99901, name: "Practice Stone" },
         ],
       },
     ],
@@ -254,6 +255,11 @@ test("output policy suppresses requested flags and reports compact potion usage"
       return;
     }
 
+    if (url.pathname === "/99901") {
+      res.end(JSON.stringify({ name: "Practice Stone", quality: 1 }));
+      return;
+    }
+
     if (url.pathname === "/27531") {
       res.end(JSON.stringify({ name: "Wastewalker Gloves", quality: 3 }));
       return;
@@ -297,6 +303,7 @@ test("output policy suppresses requested flags and reports compact potion usage"
     assert.match(stdout, /  - Multiple potion uses: Goodflask 2x Haste/);
     assert.match(stdout, /  - Haste: Goodflask 2/);
     assert.match(stdout, /  - Destruction: none/);
+    assert.doesNotMatch(stdout, /Dupecat, Dupecat/);
     const potionSection = stdout.split("**Potion usage**")[1].split("\n\n**Enchant flags**")[0];
     assert.doesNotMatch(potionSection, /Healz/);
     assert.doesNotMatch(stdout, /Tankmage 0/);
@@ -305,6 +312,7 @@ test("output policy suppresses requested flags and reports compact potion usage"
     assert.match(stdout, /  - Multiple potion uses: Goodflask 2x Haste/);
     assert.match(stdout, /  - Haste: Goodflask 2/);
     assert.match(stdout, /  - Destruction: Tankmage 1/);
-    assert.equal((stdout.match(/Dupecat: 2 green gems - Hands \(Wastewalker Gloves\): Delicate Blood Garnet x2/g) || []).length, 1);
+    assert.match(stdout, /\*\*Green\/white gem flags\*\*/);
+    assert.equal((stdout.match(/Dupecat: 3 green\/white gems - Hands \(Wastewalker Gloves\): Delicate Blood Garnet x2; Hands \(Wastewalker Gloves\): Practice Stone/g) || []).length, 1);
   });
 });

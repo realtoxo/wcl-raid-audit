@@ -19,3 +19,10 @@ test("skill contract requires report-body-only output without unsolicited follow
     /Omit action items, audit rules, empty sections, explanatory prose, and follow-up suggestions unless the user asks for them\./,
   );
 });
+
+test("skill contract describes green and white gem reporting", async () => {
+  const skill = await readFile(SKILL_PATH, "utf8");
+
+  assert.match(skill, /Green\/white gem flags/);
+  assert.match(skill, /List green\/white gem offenders/);
+});

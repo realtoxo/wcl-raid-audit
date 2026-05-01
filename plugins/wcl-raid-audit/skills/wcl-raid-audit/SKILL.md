@@ -35,10 +35,10 @@ node ~/.codex/skills/wcl-raid-audit/scripts/raid_audit.mjs "<parseforge-url-or-r
   - `Windfury / Twisting`
   - `Sapper usage`
   - `Enchant flags`
-  - `Green gem flags`
+  - `Green/white gem flags`
 - Return the report body directly. Omit action items, audit rules, empty sections, explanatory prose, and follow-up suggestions unless the user asks for them.
 - Treat real but wrong consumes as `Suboptimal`, not `Missing`.
-- List green gem offenders with `slot (item): gem` details and collapse repeated identical pairs into `xN`.
+- List green/white gem offenders with `slot (item): gem` details and collapse repeated identical pairs into `xN`.
 
 ## WCL Rules
 

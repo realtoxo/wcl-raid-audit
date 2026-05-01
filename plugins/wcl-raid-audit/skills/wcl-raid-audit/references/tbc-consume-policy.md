@@ -55,6 +55,7 @@ For Magtheridon:
 - Food buffs are expected. Only flag fully missing food by default.
 - Weapon enhancements, oils, stones, poisons, and similar enhancements are expected where applicable. Assume Windfury totem can cover melee main-hand expectations; only flag clean missing cases.
 - Gear enchants are expected and missing enchant findings should be reported.
+- Green and white quality gems should be reported with slot, item, and gem details.
 - Do not flag healer cloak enchants.
 - DPS are expected to use Haste Potion or Destruction Potion on each boss.
 - Report potion usage by encounter with the DPS players who used neither potion first, followed by compact Haste and Destruction user summaries.
