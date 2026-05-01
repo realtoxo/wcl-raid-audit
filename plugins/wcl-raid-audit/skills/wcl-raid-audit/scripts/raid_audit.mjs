@@ -18,6 +18,95 @@ const UNCOMMON_QUALITY = 2;
 const SCROLL_RANK_PATTERN = "(?:IV|V)";
 const wowheadItemCache = new Map();
 const wclFightDataCache = new Map();
+const requestCache = new Map();
+
+function retryConfig() {
+  return {
+    maxAttempts: Number.parseInt(process.env.RAID_AUDIT_MAX_RETRIES || "5", 10),
+    baseDelayMs: Number.parseInt(process.env.RAID_AUDIT_RETRY_BASE_MS || "1000", 10),
+    maxDelayMs: Number.parseInt(process.env.RAID_AUDIT_RETRY_MAX_MS || "30000", 10),
+  };
+}
+
+function logProgress(message) {
+  console.error(`[raid-audit] ${message}`);
+}
+
+function sleep(ms) {
+  return new Promise((resolveSleep) => {
+    setTimeout(resolveSleep, ms);
+  });
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function isRetryableRateLimit(status, data, text) {
+  const message = `${data?.error || ""} ${text || ""}`;
+  return status === 429 || /\b429\b|too many requests/i.test(message);
+}
+
+function delayForAttempt(attemptIndex, { baseDelayMs, maxDelayMs }) {
+  return Math.min(maxDelayMs, baseDelayMs * (2 ** attemptIndex));
+}
+
+async function readJsonResponse(res, errorPrefix) {
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    const error = new Error(`${errorPrefix} returned non-JSON: ${text.slice(0, 200)}`);
+    error.status = res.status;
+    error.bodyText = text;
+    throw error;
+  }
+
+  return { data, text };
+}
+
+async function fetchJsonWithRetry({ label, errorPrefix, fetcher }) {
+  const config = retryConfig();
+  logProgress(label);
+
+  for (let attempt = 1; attempt <= config.maxAttempts; attempt += 1) {
+    const res = await fetcher();
+    const { data, text } = await readJsonResponse(res, errorPrefix);
+    const retryable = isRetryableRateLimit(res.status, data, text);
+
+    if (res.ok && !data?.error) return data;
+
+    if (retryable && attempt < config.maxAttempts) {
+      const delayMs = delayForAttempt(attempt - 1, config);
+      logProgress(`${errorPrefix} hit ${res.status}; retrying in ${delayMs}ms (attempt ${attempt}/${config.maxAttempts})`);
+      await sleep(delayMs);
+      continue;
+    }
+
+    if (!res.ok) throw new Error(`${errorPrefix} failed ${res.status}: ${data.error || text.slice(0, 200)}`);
+    throw new Error(`${errorPrefix}: ${data.error}`);
+  }
+
+  throw new Error(`${errorPrefix} exhausted retries`);
+}
+
+function cachedJsonRequest(cacheKey, options) {
+  if (requestCache.has(cacheKey)) return requestCache.get(cacheKey);
+  const promise = fetchJsonWithRetry(options).catch((error) => {
+    requestCache.delete(cacheKey);
+    throw error;
+  });
+  requestCache.set(cacheKey, promise);
+  return promise;
+}
 
 function getWclConfig() {
   const clientId = process.env.WARCRAFTLOGS_CLIENT_ID || process.env.WCL_CLIENT_ID || "";
@@ -114,33 +203,28 @@ function extractReportCode(input) {
 }
 
 async function getJson(path) {
-  const res = await fetch(`${BASE_URL}${path}`);
-  const text = await res.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`${path} returned non-JSON: ${text.slice(0, 200)}`);
-  }
-  if (!res.ok) throw new Error(`${path} failed ${res.status}: ${data.error || text.slice(0, 200)}`);
-  return data;
+  return cachedJsonRequest(`GET ${BASE_URL}${path}`, {
+    label: path.startsWith("/api/report/")
+      ? "Loading report metadata"
+      : `GET ${path}`,
+    errorPrefix: path,
+    fetcher: () => fetch(`${BASE_URL}${path}`),
+  });
 }
 
 async function postJson(path, body) {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+  const bodyText = JSON.stringify(body);
+  return cachedJsonRequest(`POST ${BASE_URL}${path} ${stableStringify(body)}`, {
+    label: path === "/api/cla"
+      ? "Loading Parseforge consume data"
+      : `POST ${path}`,
+    errorPrefix: path,
+    fetcher: () => fetch(`${BASE_URL}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: bodyText,
+    }),
   });
-  const text = await res.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`${path} returned non-JSON: ${text.slice(0, 200)}`);
-  }
-  if (!res.ok) throw new Error(`${path} failed ${res.status}: ${data.error || text.slice(0, 200)}`);
-  return data;
 }
 
 async function wclV1GetJson(path, query = {}) {
@@ -153,17 +237,11 @@ async function wclV1GetJson(path, query = {}) {
       url.searchParams.set(key, String(value));
     }
   }
-  const res = await fetch(url);
-  const text = await res.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`WCL v1 ${path} returned non-JSON: ${text.slice(0, 200)}`);
-  }
-  if (!res.ok) throw new Error(`WCL v1 ${path} failed ${res.status}: ${data.error || text.slice(0, 200)}`);
-  if (data?.error) throw new Error(`WCL v1 ${path}: ${data.error}`);
-  return data;
+  return cachedJsonRequest(`GET ${url.toString()}`, {
+    label: `Loading WCL v1 ${path}`,
+    errorPrefix: `WCL v1 ${path}`,
+    fetcher: () => fetch(url),
+  });
 }
 
 async function getWclV1FightData(reportCode) {

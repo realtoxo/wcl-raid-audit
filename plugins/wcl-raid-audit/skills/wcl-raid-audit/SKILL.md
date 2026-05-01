@@ -49,6 +49,7 @@ node ~/.codex/skills/wcl-raid-audit/scripts/raid_audit.mjs "<parseforge-url-or-r
 - The script also accepts `WCL_*` aliases.
 - Use WCL only for metrics Parseforge cannot provide reliably, such as overall trash-inclusive WF/Grace CPM and WF gap detection.
 - Do not use full report wall-clock time as the denominator for overall Windfury CPM. Use summed combat time across pulls.
+- Network requests are cached in memory during each run. Rate-limited responses retry with exponential backoff and progress messages on stderr.
 
 ## Commands
 

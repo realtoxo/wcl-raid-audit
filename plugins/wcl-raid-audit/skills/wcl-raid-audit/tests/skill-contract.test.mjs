@@ -26,3 +26,10 @@ test("skill contract describes green and white gem reporting", async () => {
   assert.match(skill, /Green\/white gem flags/);
   assert.match(skill, /List green\/white gem offenders/);
 });
+
+test("skill contract documents request caching and rate-limit retry behavior", async () => {
+  const skill = await readFile(SKILL_PATH, "utf8");
+
+  assert.match(skill, /cached in memory/);
+  assert.match(skill, /exponential backoff/);
+});

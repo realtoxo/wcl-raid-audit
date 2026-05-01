@@ -316,3 +316,205 @@ test("output policy suppresses requested flags and reports compact potion usage"
     assert.equal((stdout.match(/Dupecat: 3 green\/white gems - Hands \(Wastewalker Gloves\): Delicate Blood Garnet x2; Hands \(Wastewalker Gloves\): Practice Stone/g) || []).length, 1);
   });
 });
+
+test("429 responses retry with progress logs before rendering report", async () => {
+  let reportAttempts = 0;
+  const tmp = await mkdtemp(join(tmpdir(), "wcl-retry-policy-"));
+  const policyPath = join(tmp, "policy.json");
+  await writeFile(policyPath, JSON.stringify({
+    name: "retry-policy",
+    version: 1,
+    reportTitle: "WCL Raid Audit",
+    reportRules: [],
+    general: {
+      food: { expected: true },
+      weaponEnhancement: { expected: true },
+      casterMana: { acceptAnyFlask: true, requiresBattleAndGuardianIfNoFlask: true },
+      physicalScrolls: { expected: false },
+    },
+    trackedDebuffs: { groups: [] },
+    encounters: [],
+  }));
+
+  await withMockServer((req, res) => {
+    const url = new URL(req.url, "http://mock.local");
+    res.setHeader("content-type", "application/json");
+
+    if (url.pathname === "/api/report/retrytest") {
+      reportAttempts += 1;
+      if (reportAttempts < 3) {
+        res.statusCode = 429;
+        res.end(JSON.stringify({ error: "Too many requests" }));
+        return;
+      }
+      res.end(JSON.stringify({
+        title: "retry test",
+        owner: "tester",
+        zone: "Gruul's Lair",
+        fights: [{ id: 1, name: "High King Maulgar", kill: true, encounterID: 50649, duration: 60000 }],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/api/cla") {
+      res.end(JSON.stringify({
+        fights: [],
+        players: [{
+          name: "Healz",
+          className: "Priest",
+          spec: "Holy",
+          role: "Healer",
+          sourceId: 1,
+          fightData: [fightData(1, { battleElixir: "Elixir of Healing Power", guardianElixir: "Elixir of Draenic Wisdom" })],
+          gearIssues: [],
+          gearSnapshot: [],
+        }],
+      }));
+      return;
+    }
+
+    res.end(JSON.stringify({ auras: [], events: [] }));
+  }, async (baseUrl) => {
+    const { stdout, stderr } = await execFile("node", [
+      SCRIPT_PATH,
+      "retrytest",
+      "--markdown",
+      "--policy",
+      policyPath,
+      "--skip-sappers",
+    ], {
+      env: {
+        ...process.env,
+        PARSEFORGE_BASE_URL: baseUrl,
+        WARCRAFTLOGS_API_KEY: "",
+        WCL_API_KEY: "",
+        WARCRAFTLOGS_CLIENT_ID: "",
+        WARCRAFTLOGS_CLIENT_SECRET: "",
+        WCL_CLIENT_ID: "",
+        WCL_CLIENT_SECRET: "",
+        RAID_AUDIT_RETRY_BASE_MS: "1",
+        RAID_AUDIT_RETRY_MAX_MS: "2",
+        RAID_AUDIT_MAX_RETRIES: "3",
+      },
+      maxBuffer: 1024 * 1024,
+    });
+
+    assert.equal(reportAttempts, 3);
+    assert.match(stdout, /\*\*WCL Raid Audit\*\*/);
+    assert.match(stderr, /Loading report metadata/);
+    assert.match(stderr, /429.*retrying in \d+ms \(attempt 1\/3\)/);
+    assert.match(stderr, /429.*retrying in \d+ms \(attempt 2\/3\)/);
+  });
+});
+
+test("duplicate player fight analysis requests are cached within a run", async () => {
+  let analyzeCalls = 0;
+  const tmp = await mkdtemp(join(tmpdir(), "wcl-cache-policy-"));
+  const policyPath = join(tmp, "policy.json");
+  await writeFile(policyPath, JSON.stringify({
+    name: "cache-policy",
+    version: 1,
+    reportTitle: "WCL Raid Audit",
+    reportRules: [],
+    general: {
+      food: { expected: true },
+      weaponEnhancement: { expected: true },
+      casterMana: { acceptAnyFlask: true, requiresBattleAndGuardianIfNoFlask: true },
+      physicalScrolls: { expected: false },
+    },
+    trackedDebuffs: { groups: [] },
+    encounters: [],
+  }));
+
+  await withMockServer((req, res) => {
+    const url = new URL(req.url, "http://mock.local");
+    res.setHeader("content-type", "application/json");
+
+    if (url.pathname === "/api/report/cachetest") {
+      res.end(JSON.stringify({
+        title: "cache test",
+        owner: "tester",
+        zone: "Gruul's Lair",
+        fights: [{ id: 1, name: "Gruul the Dragonkiller", kill: true, encounterID: 50650, duration: 60000 }],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/api/cla") {
+      res.end(JSON.stringify({
+        fights: [],
+        players: [{
+          name: "Pestilian",
+          className: "Shaman",
+          spec: "Enhancement",
+          role: "Physical",
+          sourceId: 10,
+          fightData: [fightData(1, { flask: "Flask of Relentless Assault" })],
+          gearIssues: [],
+          gearSnapshot: [],
+        }],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/api/analyze") {
+      analyzeCalls += 1;
+      res.end(JSON.stringify({
+        playerName: "Pestilian",
+        playerClass: "Shaman",
+        playerSpec: "Enhancement",
+        casts: [
+          { name: "Windfury Totem", guid: 25587, playerCasts: 3, playerCpm: 3 },
+          { name: "Grace of Air Totem", guid: 25359, playerCasts: 3, playerCpm: 3 },
+          { name: "Haste", guid: 28507, playerCasts: 1 },
+          { name: "Goblin Sapper Charge", guid: 13241, playerCasts: 1 },
+        ],
+        abilities: [{ name: "Goblin Sapper Charge", guid: 13241, playerTotal: 1000 }],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/report/fights/cachetest") {
+      res.end(JSON.stringify({
+        fights: [{ id: 1, name: "Gruul the Dragonkiller", start_time: 1000, end_time: 61000 }],
+        friendlies: [{ id: 10, name: "Pestilian", type: "Shaman", fights: [{ id: 1 }] }],
+        friendlyPets: [],
+        enemies: [],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/report/events/casts/cachetest") {
+      res.end(JSON.stringify({ events: [] }));
+      return;
+    }
+
+    res.end(JSON.stringify({ auras: [], events: [] }));
+  }, async (baseUrl) => {
+    const { stdout } = await execFile("node", [
+      SCRIPT_PATH,
+      "cachetest",
+      "--markdown",
+      "--policy",
+      policyPath,
+    ], {
+      env: {
+        ...process.env,
+        PARSEFORGE_BASE_URL: baseUrl,
+        WARCRAFTLOGS_V1_BASE_URL: baseUrl,
+        WARCRAFTLOGS_API_KEY: "test-key",
+        WCL_API_KEY: "",
+        WARCRAFTLOGS_CLIENT_ID: "",
+        WARCRAFTLOGS_CLIENT_SECRET: "",
+        WCL_CLIENT_ID: "",
+        WCL_CLIENT_SECRET: "",
+      },
+      maxBuffer: 1024 * 1024,
+    });
+
+    assert.equal(analyzeCalls, 1);
+    assert.match(stdout, /\*\*Windfury \/ Twisting\*\*/);
+    assert.match(stdout, /\*\*Sapper usage\*\*/);
+    assert.match(stdout, /\*\*Potion usage\*\*/);
+  });
+});

@@ -10,6 +10,7 @@ The script loads `default-guild-policy.json` for encounter-by-encounter rules. K
 - If no flask is present, evaluate battle/offensive elixir and guardian elixir separately.
 - Low uptime is not a failure by default. Only flag 0% / fully missing food or weapon enhancement unless the user asks for uptime analysis.
 - A real battle elixir is not Missing. It can be Suboptimal if it does not match the encounter expectation.
+- During report generation, repeated network requests are cached in memory and 429 rate limits are retried with exponential backoff.
 
 ## Physical DPS
 
