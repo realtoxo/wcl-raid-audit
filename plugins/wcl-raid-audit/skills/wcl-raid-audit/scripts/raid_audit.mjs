@@ -966,8 +966,6 @@ async function auditBossDebuffUptime(reportCode, fights, policy) {
     const rows = [];
 
     for (const group of config.groups) {
-      if (/expose armor/i.test(group.label || group.abilityName || "")) continue;
-
       if (group.kind === "pattern") {
         const pattern = new RegExp(group.namePattern, "i");
         const matches = auras

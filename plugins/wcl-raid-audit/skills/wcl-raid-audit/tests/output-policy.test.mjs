@@ -93,7 +93,6 @@ test("output policy suppresses requested flags and reports compact potion usage"
       groups: [
         { label: "Warlock curses", kind: "pattern", namePattern: "^Curse of ", alwaysShow: true, emptyText: "none" },
         { label: "IEA / Expose Armor", kind: "ability", abilityId: 26866, abilityName: "Expose Armor", alwaysShow: true, emptyText: "0.0%" },
-        { label: "Expose Weakness", kind: "ability", abilityId: 34501, abilityName: "Expose Weakness", alwaysShow: true, emptyText: "0.0%" },
         { label: "Judgement of Wisdom", kind: "ability", abilityId: 20186, abilityName: "Judgement of Wisdom", alwaysShow: true, emptyText: "0.0%" },
       ],
     },
@@ -229,6 +228,14 @@ test("output policy suppresses requested flags and reports compact potion usage"
     }
 
     if (url.pathname === "/report/tables/debuffs/policytest") {
+      if (url.searchParams.get("abilityid") === "26866") {
+        res.end(JSON.stringify({
+          totalTime: 60000,
+          auras: [{ name: "Kojay", guid: 26866, totalUptime: 60000 }],
+        }));
+        return;
+      }
+
       res.end(JSON.stringify({
         totalTime: 60000,
         auras: [
@@ -295,7 +302,8 @@ test("output policy suppresses requested flags and reports compact potion usage"
     assert.doesNotMatch(stdout, /Healz: 2 missing - Back, Wrist/);
     assert.match(stdout, /Healz: 1 missing - Wrist/);
     assert.equal((stdout.match(/Dupecat: 1 missing - Back/g) || []).length, 1);
-    assert.doesNotMatch(stdout, /IEA \/ Expose Armor/);
+    assert.match(stdout, /- IEA \/ Expose Armor: 100\.0%/);
+    assert.doesNotMatch(stdout, /Expose Weakness/);
     assert.match(stdout, /- Judgement of Wisdom: 75\.0% \(initial Kojay; reapplied by Texz\)/);
     assert.match(stdout, /\*\*Potion usage\*\*/);
     assert.match(stdout, /- High King Maulgar:/);

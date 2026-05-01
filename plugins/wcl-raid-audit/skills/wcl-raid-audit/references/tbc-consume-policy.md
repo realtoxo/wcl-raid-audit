@@ -65,7 +65,7 @@ For Magtheridon:
 
 ## Boss Debuffs
 
-- Track curse uptime and Expose Weakness uptime.
+- Track curse uptime and IEA / Expose Armor uptime.
 - Track Judgement of Wisdom uptime on each boss.
 - For Judgement of Wisdom, include the initial applier and whether it was reapplied/refreshed by another player.
-- Do not track IEA / Expose Armor uptime by default.
+- Do not track Expose Weakness uptime by default.
