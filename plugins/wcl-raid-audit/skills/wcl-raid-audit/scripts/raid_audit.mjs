@@ -13,9 +13,100 @@ const DEFAULT_POLICY_PATH = resolve(SKILL_DIR, "references/default-guild-policy.
 const WCL_WF_ABILITY_ID = 25587;
 const WCL_GRACE_ABILITY_ID = 25359;
 const WCL_WF_GAP_THRESHOLD_MS = 10000;
+const COMMON_QUALITY = 1;
 const UNCOMMON_QUALITY = 2;
+const SCROLL_RANK_PATTERN = "(?:IV|V)";
 const wowheadItemCache = new Map();
 const wclFightDataCache = new Map();
+const requestCache = new Map();
+
+function retryConfig() {
+  return {
+    maxAttempts: Number.parseInt(process.env.RAID_AUDIT_MAX_RETRIES || "5", 10),
+    baseDelayMs: Number.parseInt(process.env.RAID_AUDIT_RETRY_BASE_MS || "1000", 10),
+    maxDelayMs: Number.parseInt(process.env.RAID_AUDIT_RETRY_MAX_MS || "30000", 10),
+  };
+}
+
+function logProgress(message) {
+  console.error(`[raid-audit] ${message}`);
+}
+
+function sleep(ms) {
+  return new Promise((resolveSleep) => {
+    setTimeout(resolveSleep, ms);
+  });
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function isRetryableRateLimit(status, data, text) {
+  const message = `${data?.error || ""} ${text || ""}`;
+  return status === 429 || /\b429\b|too many requests/i.test(message);
+}
+
+function delayForAttempt(attemptIndex, { baseDelayMs, maxDelayMs }) {
+  return Math.min(maxDelayMs, baseDelayMs * (2 ** attemptIndex));
+}
+
+async function readJsonResponse(res, errorPrefix) {
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    const error = new Error(`${errorPrefix} returned non-JSON: ${text.slice(0, 200)}`);
+    error.status = res.status;
+    error.bodyText = text;
+    throw error;
+  }
+
+  return { data, text };
+}
+
+async function fetchJsonWithRetry({ label, errorPrefix, fetcher }) {
+  const config = retryConfig();
+  logProgress(label);
+
+  for (let attempt = 1; attempt <= config.maxAttempts; attempt += 1) {
+    const res = await fetcher();
+    const { data, text } = await readJsonResponse(res, errorPrefix);
+    const retryable = isRetryableRateLimit(res.status, data, text);
+
+    if (res.ok && !data?.error) return data;
+
+    if (retryable && attempt < config.maxAttempts) {
+      const delayMs = delayForAttempt(attempt - 1, config);
+      logProgress(`${errorPrefix} hit ${res.status}; retrying in ${delayMs}ms (attempt ${attempt}/${config.maxAttempts})`);
+      await sleep(delayMs);
+      continue;
+    }
+
+    if (!res.ok) throw new Error(`${errorPrefix} failed ${res.status}: ${data.error || text.slice(0, 200)}`);
+    throw new Error(`${errorPrefix}: ${data.error}`);
+  }
+
+  throw new Error(`${errorPrefix} exhausted retries`);
+}
+
+function cachedJsonRequest(cacheKey, options) {
+  if (requestCache.has(cacheKey)) return requestCache.get(cacheKey);
+  const promise = fetchJsonWithRetry(options).catch((error) => {
+    requestCache.delete(cacheKey);
+    throw error;
+  });
+  requestCache.set(cacheKey, promise);
+  return promise;
+}
 
 function getWclConfig() {
   const clientId = process.env.WARCRAFTLOGS_CLIENT_ID || process.env.WCL_CLIENT_ID || "";
@@ -112,33 +203,28 @@ function extractReportCode(input) {
 }
 
 async function getJson(path) {
-  const res = await fetch(`${BASE_URL}${path}`);
-  const text = await res.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`${path} returned non-JSON: ${text.slice(0, 200)}`);
-  }
-  if (!res.ok) throw new Error(`${path} failed ${res.status}: ${data.error || text.slice(0, 200)}`);
-  return data;
+  return cachedJsonRequest(`GET ${BASE_URL}${path}`, {
+    label: path.startsWith("/api/report/")
+      ? "Loading report metadata"
+      : `GET ${path}`,
+    errorPrefix: path,
+    fetcher: () => fetch(`${BASE_URL}${path}`),
+  });
 }
 
 async function postJson(path, body) {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+  const bodyText = JSON.stringify(body);
+  return cachedJsonRequest(`POST ${BASE_URL}${path} ${stableStringify(body)}`, {
+    label: path === "/api/cla"
+      ? "Loading Parseforge consume data"
+      : `POST ${path}`,
+    errorPrefix: path,
+    fetcher: () => fetch(`${BASE_URL}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: bodyText,
+    }),
   });
-  const text = await res.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`${path} returned non-JSON: ${text.slice(0, 200)}`);
-  }
-  if (!res.ok) throw new Error(`${path} failed ${res.status}: ${data.error || text.slice(0, 200)}`);
-  return data;
 }
 
 async function wclV1GetJson(path, query = {}) {
@@ -151,17 +237,11 @@ async function wclV1GetJson(path, query = {}) {
       url.searchParams.set(key, String(value));
     }
   }
-  const res = await fetch(url);
-  const text = await res.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(`WCL v1 ${path} returned non-JSON: ${text.slice(0, 200)}`);
-  }
-  if (!res.ok) throw new Error(`WCL v1 ${path} failed ${res.status}: ${data.error || text.slice(0, 200)}`);
-  if (data?.error) throw new Error(`WCL v1 ${path}: ${data.error}`);
-  return data;
+  return cachedJsonRequest(`GET ${url.toString()}`, {
+    label: `Loading WCL v1 ${path}`,
+    errorPrefix: `WCL v1 ${path}`,
+    fetcher: () => fetch(url),
+  });
 }
 
 async function getWclV1FightData(reportCode) {
@@ -209,6 +289,10 @@ function spellName(slot) {
   return isPresent(slot) ? slot.spellName || "(unnamed)" : "MISSING";
 }
 
+function auraName(aura) {
+  return aura?.spellName || aura?.name || "";
+}
+
 function hasSpell(slot, pattern) {
   return isPresent(slot) && pattern.test(slot.spellName || "");
 }
@@ -230,8 +314,16 @@ function isHunter(player) {
   return player.className === "Hunter";
 }
 
+function isMage(player) {
+  return player.className === "Mage";
+}
+
 function isPhysical(player) {
   return player.role === "Physical" || player.role === "Tank";
+}
+
+function isDps(player) {
+  return player.role === "Physical" || player.role === "Caster";
 }
 
 function isProtectionPaladin(player) {
@@ -250,11 +342,16 @@ function encounterRuleFor(policy, fightName) {
   return (policy.encounters || []).find((rule) => new RegExp(rule.match, "i").test(fightName)) || null;
 }
 
+function isMaulgarFight(fight) {
+  return /maulgar/i.test(fight.name || "");
+}
+
 function trackedDebuffConfig(policy) {
   return policy.trackedDebuffs || null;
 }
 
 function hasAcceptableHunterSetup(c, hunterRule = {}) {
+  if (isPresent(c.flask)) return true;
   if (slotMatches(c.flask, hunterRule.acceptableFlasks || [])) return true;
   return (hunterRule.acceptableBattleGuardianSetups || []).some((setup) => (
     slotMatches(c.battleElixir, [setup.battleElixir])
@@ -276,11 +373,100 @@ function physicalTextForExpected(rule) {
   return "expected consume";
 }
 
-function auditConsumes(report, fights, cla, options, policy) {
+function hasScroll(scrolls = [], stat) {
+  const pattern = new RegExp(`^Scroll of ${stat} ${SCROLL_RANK_PATTERN}$`, "i");
+  return scrolls.some((scroll) => pattern.test(auraName(scroll)));
+}
+
+function scrollRequirementText(stat) {
+  return `Scroll of ${stat} IV/V`;
+}
+
+function shouldAuditPhysicalScrolls(policy) {
+  return policy.general?.physicalScrolls?.expected === true;
+}
+
+function auditSelfScrolls(player, c) {
+  const scrolls = c.scrolls || [];
+  if (isHunter(player)) {
+    if (hasScroll(scrolls, "Agility")) return null;
+    return {
+      label: "Missing",
+      text: `expected ${scrollRequirementText("Agility")} on self; no matching self scroll recorded`,
+    };
+  }
+
+  if (hasScroll(scrolls, "Agility") || hasScroll(scrolls, "Strength")) return null;
+  return {
+    label: "Missing",
+    text: `expected ${scrollRequirementText("Agility")} or ${scrollRequirementText("Strength")}; no matching self scroll recorded`,
+  };
+}
+
+async function getWclV1BuffTable(reportCode, { start, end, targetId }) {
+  return wclV1GetJson(`/report/tables/buffs/${reportCode}`, {
+    start,
+    end,
+    targetid: targetId,
+    by: "target",
+  });
+}
+
+function petParticipatedInFight(pet, fightId) {
+  return (pet.fights || []).some((ref) => ref.id === fightId);
+}
+
+async function auditHunterPetScrolls(reportCode, fight, fightMeta, hunterPets) {
+  const findings = [];
+  for (const pet of hunterPets.filter((candidate) => petParticipatedInFight(candidate, fight.id))) {
+    let table;
+    try {
+      table = await getWclV1BuffTable(reportCode, {
+        start: fightMeta.start_time,
+        end: fightMeta.end_time,
+        targetId: pet.id,
+      });
+    } catch (error) {
+      findings.push({
+        label: "Data unavailable",
+        text: `pet ${pet.name} scroll check failed: ${error.message || String(error)}`,
+      });
+      continue;
+    }
+    const auras = Array.isArray(table.auras) ? table.auras : [];
+    const missing = [];
+    if (!hasScroll(auras, "Agility")) missing.push(scrollRequirementText("Agility"));
+    if (!hasScroll(auras, "Strength")) missing.push(scrollRequirementText("Strength"));
+    if (missing.length > 0) {
+      findings.push({
+        label: "Missing",
+        text: `pet ${pet.name} expected ${scrollRequirementText("Agility")} and ${scrollRequirementText("Strength")}; missing ${missing.join(" and ")}`,
+      });
+    }
+  }
+  return findings;
+}
+
+async function auditConsumes(reportCode, report, fights, cla, options, policy) {
   const findingsByFight = [];
+  const auditScrolls = shouldAuditPhysicalScrolls(policy);
+  let fightsData = null;
+  let friendlyPetsByOwner = new Map();
+  let fightMetaById = new Map();
+
+  if (auditScrolls && getWclV1ApiKey()) {
+    fightsData = await getWclV1FightData(reportCode);
+    fightMetaById = new Map((fightsData.fights || []).map((fight) => [fight.id, fight]));
+    for (const pet of fightsData.friendlyPets || []) {
+      const pets = friendlyPetsByOwner.get(pet.petOwner) || [];
+      pets.push(pet);
+      friendlyPetsByOwner.set(pet.petOwner, pets);
+    }
+  }
 
   for (const fight of fights) {
     const encounterRule = encounterRuleFor(policy, fight.name);
+    const fightMeta = fightMetaById.get(fight.id);
     const rows = [];
 
     for (const player of cla.players) {
@@ -295,11 +481,15 @@ function auditConsumes(report, fights, cla, options, policy) {
         guardianElixir: spellName(c.guardianElixir),
         food: spellName(c.food),
         weaponEnhancement: spellName(c.weaponEnhancement),
+        scrolls: (c.scrolls || []).map((scroll) => auraName(scroll)).filter(Boolean),
       };
 
       const applyPhysicalPolicy = isPhysical(player) && (options.includeTanks || !isTank(player));
+      const exemptMageTank = isMaulgarFight(fight) && isMage(player);
 
-      if (encounterRule && applyPhysicalPolicy && !isProtectionPaladin(player)) {
+      if (exemptMageTank) {
+        // Mage tank assignments on Maulgar are intentionally reviewed manually.
+      } else if (encounterRule && applyPhysicalPolicy && !isProtectionPaladin(player)) {
         const physicalRule = encounterRule.physicalDps || {};
         const expected = physicalTextForExpected(physicalRule);
 
@@ -319,7 +509,9 @@ function auditConsumes(report, fights, cla, options, policy) {
           }
         } else {
           const metExpectedFlask = !physicalRule.expectedFlasks?.length || slotMatches(c.flask, physicalRule.expectedFlasks);
-          const metExpectedBattle = !physicalRule.expectedBattleElixirs?.length || slotMatches(c.battleElixir, physicalRule.expectedBattleElixirs);
+          const metExpectedBattle = !physicalRule.expectedBattleElixirs?.length
+            || isPresent(c.flask)
+            || slotMatches(c.battleElixir, physicalRule.expectedBattleElixirs);
 
           if (!metExpectedFlask || !metExpectedBattle) {
             const used = isPresent(c.battleElixir) ? spellName(c.battleElixir) : spellName(c.flask);
@@ -329,6 +521,20 @@ function auditConsumes(report, fights, cla, options, policy) {
                 ? `expected ${expected}; used ${used}`
                 : `expected ${expected}; no flask or battle elixir recorded`,
             });
+          }
+        }
+
+        if (auditScrolls) {
+          const scrollFinding = auditSelfScrolls(player, c);
+          if (scrollFinding) findings.push(scrollFinding);
+
+          if (isHunter(player) && fightMeta && friendlyPetsByOwner.has(player.sourceId)) {
+            findings.push(...await auditHunterPetScrolls(
+              reportCode,
+              fight,
+              fightMeta,
+              friendlyPetsByOwner.get(player.sourceId),
+            ));
           }
         }
       } else if (!isPhysical(player) || isSpellDamageRole(player)) {
@@ -374,18 +580,40 @@ function auditConsumes(report, fights, cla, options, policy) {
   return findingsByFight;
 }
 
-function auditEnchants(cla) {
-  return cla.players
+function auditEnchants(cla, fights) {
+  const hasMaulgar = fights.some(isMaulgarFight);
+  const rows = cla.players
     .map((player) => ({
       player: player.name,
       className: player.className,
       spec: player.spec,
+      role: player.role,
       missing: (player.gearIssues || [])
         .filter((issue) => issue.issueType === "missing_enchant")
+        .filter((issue) => !(player.role === "Healer" && issue.slotName === "Back"))
         .map((issue) => issue.slotName),
     }))
-    .filter((row) => row.missing.length > 0)
+    .filter((row) => !(hasMaulgar && row.className === "Mage"))
+    .filter((row) => row.missing.length > 0);
+
+  return uniqueRowsBy(rows, (row) => JSON.stringify([
+    row.player,
+    row.className,
+    row.missing,
+  ]))
     .sort((a, b) => b.missing.length - a.missing.length || a.player.localeCompare(b.player));
+}
+
+function uniqueRowsBy(rows, keyForRow) {
+  const seen = new Set();
+  const unique = [];
+  for (const row of rows) {
+    const key = keyForRow(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(row);
+  }
+  return unique;
 }
 
 async function auditGreenGems(cla) {
@@ -428,7 +656,7 @@ async function auditGreenGems(cla) {
       for (const gem of item.gems || []) {
         const gemInfo = gemMeta.get(gem.id);
         const itemInfo = itemMeta.get(item.itemId);
-        if (gemInfo?.quality === UNCOMMON_QUALITY) {
+        if (isLowQualityGem(gemInfo)) {
           matches.push({
             slotName: item.slotName,
             itemId: item.itemId,
@@ -451,8 +679,18 @@ async function auditGreenGems(cla) {
     }
   }
 
-  rows.sort((a, b) => b.gems.length - a.gems.length || a.player.localeCompare(b.player));
-  return { rows, errors };
+  const uniqueRows = uniqueRowsBy(rows, (row) => JSON.stringify([
+    row.player,
+    row.className,
+    greenGemSignature(row.gems),
+  ]));
+
+  uniqueRows.sort((a, b) => b.gems.length - a.gems.length || a.player.localeCompare(b.player));
+  return { rows: uniqueRows, errors };
+}
+
+function isLowQualityGem(gemInfo) {
+  return gemInfo?.quality === COMMON_QUALITY || gemInfo?.quality === UNCOMMON_QUALITY;
 }
 
 function isEnhancementShaman(player) {
@@ -464,8 +702,30 @@ function isPlaceholderItemName(name, itemId) {
   return name === `Item #${itemId}` || /^Item #\d+$/.test(name);
 }
 
+function greenGemSignature(gems) {
+  return gems
+    .map((gem) => JSON.stringify([
+      gem.slotName,
+      gem.itemId,
+      gem.itemName,
+      gem.gemId,
+      gem.gemName,
+    ]))
+    .sort();
+}
+
 function findCastMetric(casts, name) {
   return casts.find((cast) => cast.name === name) || null;
+}
+
+function castCount(cast) {
+  return typeof cast?.playerCasts === "number" ? cast.playerCasts : 0;
+}
+
+function countPotionCasts(casts, matcher) {
+  return casts
+    .filter((cast) => matcher(cast.name || "", cast.guid))
+    .reduce((total, cast) => total + castCount(cast), 0);
 }
 
 async function countWclV1CastMetrics(reportCode, { sourceId, start, end, abilityIds = [] }) {
@@ -624,6 +884,15 @@ async function getWclV1DebuffTable(reportCode, { start, end, targetId, abilityId
   });
 }
 
+async function getWclV1DebuffEvents(reportCode, { start, end, targetId, abilityId }) {
+  return wclV1GetJson(`/report/events/debuffs/${reportCode}`, {
+    start,
+    end,
+    targetid: targetId,
+    abilityid: abilityId,
+  });
+}
+
 function uniqueSortedNames(rows = []) {
   return Array.from(new Set(rows.map((row) => row.name).filter(Boolean)))
     .sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" }));
@@ -642,6 +911,25 @@ async function attributionNamesForDebuff(reportCode, fight, targetId, abilityId)
     abilityId,
   });
   return uniqueSortedNames(data.auras || []);
+}
+
+async function judgementOfWisdomDetail(reportCode, fight, targetId, abilityId) {
+  const data = await getWclV1DebuffEvents(reportCode, {
+    start: fight.start_time,
+    end: fight.end_time,
+    targetId,
+    abilityId,
+  });
+  const events = (data.events || [])
+    .filter((event) => event?.ability?.guid === abilityId || nameMatches(event?.ability?.name || "", "Judgement of Wisdom"))
+    .filter((event) => ["applydebuff", "refreshdebuff"].includes(event.type))
+    .sort((left, right) => (left.timestamp || 0) - (right.timestamp || 0));
+
+  const initial = events[0]?.source?.name || null;
+  const reapplications = uniqueSortedNames(events.slice(1).map((event) => ({ name: event?.source?.name })));
+  if (!initial) return "initial unknown; not reapplied";
+  if (reapplications.length === 0) return `initial ${initial}; not reapplied`;
+  return `initial ${initial}; reapplied by ${reapplications.join(", ")}`;
 }
 
 async function auditBossDebuffUptime(reportCode, fights, policy) {
@@ -711,13 +999,22 @@ async function auditBossDebuffUptime(reportCode, fights, policy) {
           continue;
         }
 
-        let sources = [];
-        try {
-          sources = await attributionNamesForDebuff(reportCode, fightMeta, bossActor.id, aura.guid);
-        } catch (error) {
-          errors.push({ fightId: fight.id, abilityId: aura.guid, error: error.message || String(error) });
+        let sourceSuffix = "";
+        if (nameMatches(group.abilityName || "", "Judgement of Wisdom") || aura.guid === 20186) {
+          try {
+            sourceSuffix = ` (${await judgementOfWisdomDetail(reportCode, fightMeta, bossActor.id, aura.guid)})`;
+          } catch (error) {
+            errors.push({ fightId: fight.id, abilityId: aura.guid, error: error.message || String(error) });
+          }
+        } else {
+          let sources = [];
+          try {
+            sources = await attributionNamesForDebuff(reportCode, fightMeta, bossActor.id, aura.guid);
+          } catch (error) {
+            errors.push({ fightId: fight.id, abilityId: aura.guid, error: error.message || String(error) });
+          }
+          sourceSuffix = sources.length > 0 ? ` (${sources.join(", ")})` : "";
         }
-        const sourceSuffix = sources.length > 0 ? ` (${sources.join(", ")})` : "";
         rows.push({ label: group.label, text: `${formatPercent(aura.totalUptime, totalTime)}${sourceSuffix}` });
       }
     }
@@ -898,6 +1195,76 @@ async function auditSappers(reportCode, report, fights, cla) {
   };
 }
 
+async function auditPotionUsage(reportCode, report, fights, cla) {
+  const rows = [];
+  const errors = [];
+  const tasks = [];
+
+  for (const fight of fights) {
+    for (const player of cla.players) {
+      if (!isDps(player)) continue;
+      if (isMaulgarFight(fight) && isMage(player)) continue;
+      const hasFight = (player.fightData || []).some((d) => d.fightId === fight.id);
+      if (!hasFight) continue;
+      tasks.push(async () => {
+        try {
+          const data = await postJson("/api/analyze", {
+            reportCode,
+            fightId: fight.id,
+            sourceId: player.sourceId,
+            encounterID: fight.encounterID,
+            encounterName: fight.name,
+            zoneName: report.zone,
+          });
+          const casts = Array.isArray(data.casts?.casts)
+            ? data.casts.casts
+            : Array.isArray(data.casts)
+              ? data.casts
+              : [];
+          rows.push({
+            fightId: fight.id,
+            fightName: fight.name,
+            player: data.playerName || player.name,
+            className: data.playerClass || player.className,
+            spec: data.playerSpec || player.spec,
+            haste: countPotionCasts(casts, (name, guid) => guid === 28507 || /^Haste(?: Potion)?$/i.test(name)),
+            destruction: countPotionCasts(casts, (name, guid) => guid === 28508 || /^Destruction Potion$/i.test(name)),
+          });
+        } catch (error) {
+          errors.push({ fight: fight.name, player: player.name, error: error.message || String(error) });
+        }
+      });
+    }
+  }
+
+  await runLimited(tasks, 4);
+
+  return {
+    fights: fights.map((fight) => ({
+      fightId: fight.id,
+      fightName: fight.name,
+      rows: mergePotionRows(rows.filter((row) => row.fightId === fight.id))
+        .sort((a, b) => a.player.localeCompare(b.player)),
+    })),
+    errors,
+  };
+}
+
+function mergePotionRows(rows) {
+  const byPlayer = new Map();
+  for (const row of rows) {
+    const key = `${row.player}\0${row.className}`;
+    const existing = byPlayer.get(key);
+    if (!existing) {
+      byPlayer.set(key, { ...row });
+      continue;
+    }
+    existing.haste = Math.max(existing.haste, row.haste);
+    existing.destruction = Math.max(existing.destruction, row.destruction);
+  }
+  return Array.from(byPlayer.values());
+}
+
 async function runLimited(tasks, limit) {
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, async () => {
@@ -915,6 +1282,29 @@ function formatDamage(value) {
 
 function typeSummary(types) {
   return types.map((type) => `${type.casts}x ${type.type}`).join(", ");
+}
+
+function formatPotionGroup(rows, key) {
+  const users = rows.filter((row) => row[key] > 0);
+  return users.length > 0
+    ? users.map((row) => `${row.player} ${row[key]}`).join(", ")
+    : "none";
+}
+
+function formatNoPotionUsers(rows) {
+  const zeroes = rows.filter((row) => row.haste === 0 && row.destruction === 0);
+  return zeroes.length > 0 ? zeroes.map((row) => row.player).join(", ") : "none";
+}
+
+function formatMultiplePotionUsers(rows) {
+  const parts = [];
+  for (const row of rows) {
+    const playerParts = [];
+    if (row.haste > 1) playerParts.push(`${row.haste}x Haste`);
+    if (row.destruction > 1) playerParts.push(`${row.destruction}x Destruction`);
+    if (playerParts.length > 0) parts.push(`${row.player} ${playerParts.join(", ")}`);
+  }
+  return parts.length > 0 ? parts.join("; ") : "none";
 }
 
 function formatGreenGemDetails(gems) {
@@ -1012,6 +1402,19 @@ function renderMarkdown(result) {
     }
   }
 
+  const potionFights = result.potionUsage.fights.filter((fight) => fight.rows.length > 0);
+  if (potionFights.length > 0) {
+    lines.push("");
+    lines.push("**Potion usage**");
+    for (const fight of potionFights) {
+      lines.push(`- ${fight.fightName}:`);
+      lines.push(`  - No haste/destruction potion: ${formatNoPotionUsers(fight.rows)}`);
+      lines.push(`  - Multiple potion uses: ${formatMultiplePotionUsers(fight.rows)}`);
+      lines.push(`  - Haste: ${formatPotionGroup(fight.rows, "haste")}`);
+      lines.push(`  - Destruction: ${formatPotionGroup(fight.rows, "destruction")}`);
+    }
+  }
+
   if (result.enchantFindings.length > 0) {
     lines.push("");
     lines.push("**Enchant flags**");
@@ -1022,10 +1425,10 @@ function renderMarkdown(result) {
 
   if (result.greenGemFindings.rows.length > 0) {
     lines.push("");
-    lines.push("**Green gem flags**");
+    lines.push("**Green/white gem flags**");
     for (const row of result.greenGemFindings.rows) {
       const details = formatGreenGemDetails(row.gems);
-      lines.push(`- ${row.player}: ${row.gems.length} green gem${row.gems.length === 1 ? "" : "s"} - ${details}`);
+      lines.push(`- ${row.player}: ${row.gems.length} green/white gem${row.gems.length === 1 ? "" : "s"} - ${details}`);
     }
   }
 
@@ -1036,11 +1439,14 @@ function renderMarkdown(result) {
   if (result.windfury?.errors?.length > 0) {
     warningLines.push(`- Windfury analysis had ${result.windfury.errors.length} fetch errors; rerun if exact CPM counts matter.`);
   }
+  if (result.potionUsage?.errors?.length > 0) {
+    warningLines.push(`- Potion analysis had ${result.potionUsage.errors.length} player/fight fetch errors; rerun if exact potion counts matter.`);
+  }
   if (result.bossDebuffUptime?.errors?.length > 0) {
     warningLines.push(`- Boss debuff uptime analysis had ${result.bossDebuffUptime.errors.length} WCL fetch errors; rerun if exact uptime values matter.`);
   }
   if (result.greenGemFindings.errors.length > 0) {
-    warningLines.push(`- Green gem analysis had ${result.greenGemFindings.errors.length} gem lookup errors; rerun if exact green gem flags matter.`);
+    warningLines.push(`- Green/white gem analysis had ${result.greenGemFindings.errors.length} gem lookup errors; rerun if exact gem flags matter.`);
   }
   if (warningLines.length > 0) {
     lines.push("");
@@ -1093,11 +1499,12 @@ async function main() {
       configured: Boolean(getWclConfig()),
       apiUrl: getWclConfig()?.apiUrl || null,
     },
-    consumeFindings: auditConsumes(report, fights, cla, options, policy),
-    enchantFindings: auditEnchants(cla),
+    consumeFindings: await auditConsumes(reportCode, report, fights, cla, options, policy),
+    enchantFindings: auditEnchants(cla, fights),
     greenGemFindings: await auditGreenGems(cla),
     bossDebuffUptime: await auditBossDebuffUptime(reportCode, fights, policy),
     windfury: await auditWindfury(reportCode, report, fights, cla),
+    potionUsage: await auditPotionUsage(reportCode, report, fights, cla),
     sappers: options.skipSappers ? { rows: [], summary: [], errors: [] } : await auditSappers(reportCode, report, fights, cla),
   };
 

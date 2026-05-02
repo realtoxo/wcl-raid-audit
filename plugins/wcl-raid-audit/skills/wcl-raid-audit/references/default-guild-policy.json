@@ -8,10 +8,18 @@
     "Physical DPS: expected Elixir of Demonslaying on Magtheridon.",
     "Casters / mana users: expected flask OR battle elixir + guardian elixir.",
     "Elixir of Major Agility / Major Strength count as real offensive consumes, but are marked **Suboptimal** when they do not meet the encounter/class expectation.",
+    "A flask satisfies the Magtheridon physical DPS consume check even when Elixir of Demonslaying would be ideal.",
     "Flask of Blinding Light is acceptable for Protection Paladin and spell-damage caster roles where appropriate.",
+    "Mage tank assignments on High King Maulgar are not flagged for consumes or enchants.",
+    "Healers are not flagged for missing cloak enchants.",
     "Melee/physical are not flagged for missing guardian elixir.",
+    "Physical DPS: expected Scroll of Agility IV/V or Scroll of Strength IV/V on self each encounter.",
+    "Hunters: expected Scroll of Agility IV/V on self and Scroll of Agility IV/V + Scroll of Strength IV/V on active pets each encounter.",
+    "Track IEA / Expose Armor and Judgement of Wisdom uptime per boss, including Wisdom's initial applier and whether it was reapplied.",
+    "DPS are expected to use Haste Potion or Destruction Potion on each boss; potion reporting focuses on DPS who used neither and calls out 2+ potion uses.",
     "Food and weapon enhancements are flagged only when fully missing.",
     "Gear enchants expected.",
+    "Green and white quality gems are flagged.",
     "Sapper usage encouraged."
   ],
   "general": {
@@ -36,6 +44,9 @@
     "casterMana": {
       "acceptAnyFlask": true,
       "requiresBattleAndGuardianIfNoFlask": true
+    },
+    "physicalScrolls": {
+      "expected": true
     }
   },
   "trackedDebuffs": {
@@ -57,10 +68,10 @@
         "emptyText": "0.0%"
       },
       {
-        "label": "Expose Weakness",
+        "label": "Judgement of Wisdom",
         "kind": "ability",
-        "abilityId": 34501,
-        "abilityName": "Expose Weakness",
+        "abilityId": 20186,
+        "abilityName": "Judgement of Wisdom",
         "alwaysShow": true,
         "emptyText": "0.0%"
       }

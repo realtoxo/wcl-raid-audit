@@ -35,10 +35,10 @@ node ~/.codex/skills/wcl-raid-audit/scripts/raid_audit.mjs "<parseforge-url-or-r
   - `Windfury / Twisting`
   - `Sapper usage`
   - `Enchant flags`
-  - `Green gem flags`
+  - `Green/white gem flags`
 - Return the report body directly. Omit action items, audit rules, empty sections, explanatory prose, and follow-up suggestions unless the user asks for them.
 - Treat real but wrong consumes as `Suboptimal`, not `Missing`.
-- List green gem offenders with `slot (item): gem` details and collapse repeated identical pairs into `xN`.
+- List green/white gem offenders with `slot (item): gem` details and collapse repeated identical pairs into `xN`.
 
 ## WCL Rules
 
@@ -49,6 +49,7 @@ node ~/.codex/skills/wcl-raid-audit/scripts/raid_audit.mjs "<parseforge-url-or-r
 - The script also accepts `WCL_*` aliases.
 - Use WCL only for metrics Parseforge cannot provide reliably, such as overall trash-inclusive WF/Grace CPM and WF gap detection.
 - Do not use full report wall-clock time as the denominator for overall Windfury CPM. Use summed combat time across pulls.
+- Network requests are cached in memory during each run. Rate-limited responses retry with exponential backoff and progress messages on stderr.
 
 ## Commands
 
