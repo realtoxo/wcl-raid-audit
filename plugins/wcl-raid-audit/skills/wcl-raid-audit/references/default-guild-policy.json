@@ -15,7 +15,8 @@
     "Melee/physical are not flagged for missing guardian elixir.",
     "Physical DPS: expected Scroll of Agility IV/V or Scroll of Strength IV/V on self each encounter.",
     "Hunters: expected Scroll of Agility IV/V on self and Scroll of Agility IV/V + Scroll of Strength IV/V on active pets each encounter.",
-    "Track IEA / Expose Armor and Judgement of Wisdom uptime per boss, including Wisdom's initial applier and whether it was reapplied.",
+    "Track boss buffs/debuffs normalized to boss active/hittable time: IEA / Expose Armor, Judgement of Wisdom, Faerie Fire, Demo Shout / Roar, tank Ironshield Potion usage when tank damage is meaningfully physical, Sunder Armor application counts by warrior, and opening Sunder counts before IEA.",
+    "Raid deaths are listed at the bottom of the report for killed encounters only; encounters with more than three deaths collapse to a player-name list.",
     "DPS are expected to use Haste Potion or Destruction Potion on each boss; potion reporting focuses on DPS who used neither and calls out 2+ potion uses.",
     "Food and weapon enhancements are flagged only when fully missing.",
     "Gear enchants expected.",
@@ -50,7 +51,7 @@
     }
   },
   "trackedDebuffs": {
-    "title": "Boss Debuff Uptime",
+    "title": "Boss Buff / Debuff Audit",
     "groups": [
       {
         "label": "Warlock curses",
@@ -72,6 +73,14 @@
         "kind": "ability",
         "abilityId": 20186,
         "abilityName": "Judgement of Wisdom",
+        "alwaysShow": true,
+        "emptyText": "0.0%"
+      },
+      {
+        "label": "Faerie Fire",
+        "kind": "pattern",
+        "namePattern": "^Faerie Fire( \\(Feral\\))?$",
+        "combine": "union",
         "alwaysShow": true,
         "emptyText": "0.0%"
       }

@@ -1,6 +1,6 @@
 ---
 name: wcl-raid-audit
-description: Create officer-ready World of Warcraft TBC raid audit reports from Parseforge URLs or report codes and, when needed, Warcraft Logs data. Use when asked for Discord-ready leadership audits of raid logs, missing or suboptimal consumes, missing enchants, sappers, Windfury/twisting, boss debuff uptime, green gems, or other raid compliance issues.
+description: Create officer-ready World of Warcraft TBC raid audit reports from Parseforge URLs or report codes and, when needed, Warcraft Logs data. Use when asked for Discord-ready leadership audits of raid logs, missing or suboptimal consumes, missing enchants, sappers, Windfury/twisting, boss buff/debuff uptime, green gems, or other raid compliance issues.
 ---
 
 # WCL Raid Audit
@@ -22,7 +22,7 @@ node ~/.codex/skills/wcl-raid-audit/scripts/raid_audit.mjs "<parseforge-url-or-r
 - Read `references/default-guild-policy.json` when changing raid expectations or checking how the script should label `Missing`, `Suboptimal`, or `Incomplete caster setup`.
 - Read `references/tbc-consume-policy.md` when class- or encounter-specific consume expectations are disputed.
 - Read `references/windfury-cpm-method.md` when changing Windfury metrics, WCL usage, or combat-time denominator rules.
-- Read `references/boss-debuff-uptime.md` when changing warlock curse, IEA / Expose Armor, or Expose Weakness uptime tracking.
+- Read `references/boss-debuff-uptime.md` when changing warlock curse, IEA / Expose Armor, Faerie Fire, Demo Shout / Roar, or other boss buff/debuff uptime tracking.
 
 ## Workflow
 
@@ -31,12 +31,17 @@ node ~/.codex/skills/wcl-raid-audit/scripts/raid_audit.mjs "<parseforge-url-or-r
 - Keep the report issue-focused by default:
   - title + source
   - encounter issue sections
-  - `Boss Debuff Uptime`
+  - `Boss Buff / Debuff Audit`
+  - `Trash Sunder / IEA Applications`
   - `Windfury / Twisting`
   - `Sapper usage`
   - `Enchant flags`
   - `Green/white gem flags`
+  - `Raid Deaths`
+- For raid audit reports, answer with a single fenced markdown code block containing only the report body.
 - Return the report body directly. Omit action items, audit rules, empty sections, explanatory prose, and follow-up suggestions unless the user asks for them.
+- The code block is a transport wrapper for Codex copy/paste; do not include explanation before or after it.
+- The user copies the code block contents into Discord so the literal markdown markers are preserved.
 - Treat real but wrong consumes as `Suboptimal`, not `Missing`.
 - List green/white gem offenders with `slot (item): gem` details and collapse repeated identical pairs into `xN`.
 
@@ -47,9 +52,9 @@ node ~/.codex/skills/wcl-raid-audit/scripts/raid_audit.mjs "<parseforge-url-or-r
   - `WARCRAFTLOGS_CLIENT_ID`
   - `WARCRAFTLOGS_CLIENT_SECRET`
 - The script also accepts `WCL_*` aliases.
-- Use WCL only for metrics Parseforge cannot provide reliably, such as overall trash-inclusive WF/Grace CPM and WF gap detection.
+- Use WCL only for metrics Parseforge cannot provide reliably, such as boss buff/debuff timing normalized to boss active/hittable windows, effective Sunder/IEA debuff application counts, armor debuff falloffs, Ironshield Potion usage, raid death snapshots, overall trash-inclusive WF/Grace CPM, and WF gap detection.
 - Do not use full report wall-clock time as the denominator for overall Windfury CPM. Use summed combat time across pulls.
-- Network requests are cached in memory during each run. Rate-limited responses retry with exponential backoff and progress messages on stderr.
+- Network requests are cached in memory and persisted in a local SQLite database across runs. By default the cache lives at `${XDG_CACHE_HOME:-~/.cache}/wcl-raid-audit/raid-audit-cache.sqlite`; set `RAID_AUDIT_CACHE_PATH` to override it or `RAID_AUDIT_DISABLE_DISK_CACHE=1` to use memory-only caching. Rate-limited responses retry with exponential backoff and progress messages on stderr.
 
 ## Commands
 

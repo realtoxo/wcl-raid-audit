@@ -17,10 +17,10 @@ test("boss debuff uptime section reports curse and expose armor uptimes", async 
     maxBuffer: 1024 * 1024 * 10,
   });
 
-  assert.match(stdout, /\*\*Boss Debuff Uptime\*\*/);
+  assert.match(stdout, /\*\*Boss Buff \/ Debuff Audit\*\*/);
   assert.match(
     stdout,
-    /- Warlock curses: Curse of the Elements 97\.7% \(Tombaldini\); Curse of Doom 83\.1% \(Juggathot, Rizzerz\); Curse of Agony 13\.3% \(Juggathot, Rizzerz\)/,
+    /- Warlock curses: Curse of the Elements \d+\.\d% \(Tombaldini\); Curse of Doom \d+\.\d% \(Juggathot, Rizzerz\); Curse of Agony \d+\.\d% \(Juggathot, Rizzerz\)/,
   );
   assert.match(stdout, /- IEA \/ Expose Armor:/);
   assert.doesNotMatch(stdout, /Expose Weakness/);

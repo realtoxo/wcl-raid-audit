@@ -158,6 +158,7 @@ test("physical scroll audit flags missing self scrolls and hunter pet scrolls pe
         WARCRAFTLOGS_CLIENT_SECRET: "",
         WCL_CLIENT_ID: "",
         WCL_CLIENT_SECRET: "",
+        RAID_AUDIT_DISABLE_DISK_CACHE: "1",
       },
       maxBuffer: 1024 * 1024,
     });
@@ -166,5 +167,113 @@ test("physical scroll audit flags missing self scrolls and hunter pet scrolls pe
     assert.match(stdout, /Norogue: \*\*Missing\*\* - expected Scroll of Agility IV\/V or Scroll of Strength IV\/V; no matching self scroll recorded/);
     assert.match(stdout, /Petmiss: \*\*Missing\*\* - expected Scroll of Agility IV\/V on self; no matching self scroll recorded/);
     assert.match(stdout, /Petmiss: \*\*Missing\*\* - pet Bitey expected Scroll of Agility IV\/V and Scroll of Strength IV\/V; missing Scroll of Strength IV\/V/);
+  });
+});
+
+test("physical scroll audit does not require encounter-specific physical consume rules", async () => {
+  const tmp = await mkdtemp(join(tmpdir(), "wcl-scroll-policy-"));
+  const policyPath = join(tmp, "policy.json");
+  await writeFile(policyPath, JSON.stringify({
+    name: "test-policy",
+    version: 1,
+    reportTitle: "WCL Raid Audit",
+    reportRules: [],
+    general: {
+      food: { expected: true },
+      weaponEnhancement: { expected: true },
+      physicalScrolls: { expected: true },
+      casterMana: { acceptAnyFlask: true, requiresBattleAndGuardianIfNoFlask: true },
+    },
+    trackedDebuffs: { groups: [] },
+    encounters: [],
+  }));
+
+  await withMockServer((req, res) => {
+    const url = new URL(req.url, "http://mock.local");
+    res.setHeader("content-type", "application/json");
+
+    if (url.pathname === "/api/report/scrollfallback") {
+      res.end(JSON.stringify({
+        title: "scroll fallback test",
+        owner: "tester",
+        zone: "Serpentshrine Cavern",
+        fights: [{ id: 1, name: "Hydross the Unstable", kill: true, encounterID: 21216, duration: 60000 }],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/api/cla") {
+      res.end(JSON.stringify({
+        fights: [{ id: 1, name: "Hydross the Unstable" }],
+        players: [
+          player({ name: "Goodwar", className: "Warrior", spec: "Fury", sourceId: 1, scrolls: ["Scroll of Strength V"] }),
+          player({ name: "Petmiss", className: "Hunter", spec: "BeastMastery", sourceId: 3, scrolls: ["Scroll of Intellect V"] }),
+          player({ name: "Norogue", className: "Rogue", spec: "Combat", sourceId: 4, scrolls: [] }),
+          player({ name: "Enhmiss", className: "Shaman", spec: "Enhancement", sourceId: 5, scrolls: [] }),
+          player({ name: "Catmiss", className: "Druid", spec: "Feral", sourceId: 6, scrolls: [] }),
+          player({ name: "Retmiss", className: "Paladin", spec: "Retribution", sourceId: 7, scrolls: [] }),
+          player({ name: "Dreambear", className: "Druid", spec: "Dreamstate", sourceId: 8, scrolls: [] }),
+        ],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/api/analyze") {
+      res.end(JSON.stringify({ casts: [], abilities: [] }));
+      return;
+    }
+
+    if (url.pathname === "/report/fights/scrollfallback") {
+      res.end(JSON.stringify({
+        fights: [{ id: 1, name: "Hydross the Unstable", start_time: 1000, end_time: 61000 }],
+        friendlies: [{ id: 3, name: "Petmiss", type: "Hunter", fights: [{ id: 1 }] }],
+        friendlyPets: [{ id: 30, name: "Bitey", type: "Pet", petOwner: 3, fights: [{ id: 1, instances: 1 }] }],
+        enemies: [],
+      }));
+      return;
+    }
+
+    if (url.pathname === "/report/tables/buffs/scrollfallback" && url.searchParams.get("targetid") === "30") {
+      res.end(JSON.stringify({
+        totalTime: 60000,
+        auras: [{ name: "Scroll of Agility V", guid: 33081, totalUptime: 60000 }],
+      }));
+      return;
+    }
+
+    res.end(JSON.stringify({ auras: [], events: [] }));
+  }, async (baseUrl) => {
+    const { stdout } = await execFile("node", [
+      SCRIPT_PATH,
+      "scrollfallback",
+      "--markdown",
+      "--skip-sappers",
+      "--policy",
+      policyPath,
+    ], {
+      env: {
+        ...process.env,
+        PARSEFORGE_BASE_URL: baseUrl,
+        WARCRAFTLOGS_V1_BASE_URL: baseUrl,
+        WARCRAFTLOGS_API_KEY: "test-key",
+        WCL_API_KEY: "",
+        WARCRAFTLOGS_CLIENT_ID: "",
+        WARCRAFTLOGS_CLIENT_SECRET: "",
+        WCL_CLIENT_ID: "",
+        WCL_CLIENT_SECRET: "",
+        RAID_AUDIT_DISABLE_DISK_CACHE: "1",
+      },
+      maxBuffer: 1024 * 1024,
+    });
+
+    assert.doesNotMatch(stdout, /Goodwar: .*scroll/i);
+    assert.doesNotMatch(stdout, /expected Flask of Relentless Assault/);
+    assert.match(stdout, /Petmiss: \*\*Missing\*\* - expected Scroll of Agility IV\/V on self; no matching self scroll recorded/);
+    assert.match(stdout, /Petmiss: \*\*Missing\*\* - pet Bitey expected Scroll of Agility IV\/V and Scroll of Strength IV\/V; missing Scroll of Strength IV\/V/);
+    assert.match(stdout, /Norogue: \*\*Missing\*\* - expected Scroll of Agility IV\/V or Scroll of Strength IV\/V; no matching self scroll recorded/);
+    assert.match(stdout, /Enhmiss: \*\*Missing\*\* - expected Scroll of Agility IV\/V or Scroll of Strength IV\/V; no matching self scroll recorded/);
+    assert.match(stdout, /Catmiss: \*\*Missing\*\* - expected Scroll of Agility IV\/V or Scroll of Strength IV\/V; no matching self scroll recorded/);
+    assert.match(stdout, /Retmiss: \*\*Missing\*\* - expected Scroll of Agility IV\/V or Scroll of Strength IV\/V; no matching self scroll recorded/);
+    assert.doesNotMatch(stdout, /Dreambear: .*Scroll of Agility/i);
   });
 });
